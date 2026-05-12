@@ -2,7 +2,7 @@
 
 这是一个微信公众号文章采集、清洗、股票信息提取和网页展示的小工具。
 
-目前项目主要围绕盘前类公众号文章做处理：先采集公众号文章正文，再保存到 SQLite 数据库，然后调用 GPT API 提取文章里提到的股票、理由和利好/利空倾向，最后通过网页进行筛选和统计。
+项目现在主要围绕盘前类公众号文章做处理：先采集公众号文章正文，再保存到 SQLite 数据库，然后调用 GPT API 提取文章里提到的股票、理由和利好/利空倾向，最后通过网页进行筛选和统计。
 
 ## 已有功能
 
@@ -16,9 +16,12 @@
 - 支持股票视角统计，例如过去 7/14/30 天提及次数
 - 支持账号密码登录
 - 管理员可以创建普通用户
+- 支持一条命令跑完整自动化链路
 
 ## 主要文件
 
+- `config/accounts.json`：公众号自动采集配置
+- `auto_pipeline.py`：自动化总控脚本
 - `wechat_crawler.py`：采集公众号文章并清洗正文
 - `wechat_db.py`：把 JSONL 文章数据导入 SQLite
 - `stock_extractor.py`：调用 GPT API 提取文章里的股票信息
@@ -50,7 +53,83 @@ LLM_MODEL=gpt-5.4-mini
 
 `.env` 不会上传到 GitHub，避免泄露密钥。
 
-## 常用命令
+## 自动化采集
+
+公众号列表放在：
+
+```text
+config/accounts.json
+```
+
+默认已经配置了：
+
+```text
+盘前纪要
+盘前早咖
+```
+
+要新增公众号，只需要在 `accounts` 里加一段：
+
+```json
+{
+  "name": "新的公众号名",
+  "enabled": true,
+  "crawl_days": 7,
+  "limit": 1000,
+  "seed_urls": []
+}
+```
+
+初始化自动化状态表：
+
+```powershell
+python auto_pipeline.py init-db
+```
+
+跑完整链路：
+
+```powershell
+python auto_pipeline.py run
+```
+
+只跑某一个公众号：
+
+```powershell
+python auto_pipeline.py run --account "盘前纪要"
+```
+
+临时补采最近 30 天：
+
+```powershell
+python auto_pipeline.py run --account "盘前纪要" --days 30
+```
+
+强制重新跑 GPT 股票提取：
+
+```powershell
+python auto_pipeline.py run --account "盘前纪要" --force
+```
+
+查看最近一次自动化运行状态：
+
+```powershell
+python auto_pipeline.py status
+```
+
+自动化脚本会做这几件事：
+
+```text
+读取公众号配置
+获取最近 N 天文章
+清洗并写入 articles.jsonl
+导入 SQLite
+只挑选未提取或内容变更的文章调用 GPT
+记录 pipeline_runs 和 crawl_state 状态
+```
+
+如果某个公众号失败，脚本会记录失败原因，并继续处理其他公众号。
+
+## 手动命令
 
 采集公众号文章：
 
@@ -82,7 +161,25 @@ python stock_web.py --host 127.0.0.1 --port 8088
 http://127.0.0.1:8088
 ```
 
-第一次启动时，如果数据库里还没有账号，系统会自动创建管理员账号 `admin`。如果没有提前设置 `STOCK_WEB_ADMIN_PASSWORD`，启动日志里会打印一个随机生成的管理员密码。
+第一次启动网页时，如果数据库里还没有账号，系统会自动创建管理员账号 `admin`。如果没有提前设置 `STOCK_WEB_ADMIN_PASSWORD`，启动日志里会打印一个随机生成的管理员密码。
+
+## 服务器定时任务参考
+
+阿里云 Linux 上可以用 `cron` 定时跑自动链路。
+
+编辑定时任务：
+
+```bash
+crontab -e
+```
+
+工作日早上 7 点到 10 点，每 30 分钟跑一次：
+
+```cron
+*/30 7-10 * * 1-5 cd /opt/wechat-OA/wechat-OA && python3 auto_pipeline.py run >> logs/pipeline.log 2>&1
+```
+
+注意：如果 WeWe RSS 的微信登录过期，需要打开 WeWe RSS 页面重新扫码授权。
 
 ## 数据说明
 
@@ -90,6 +187,16 @@ http://127.0.0.1:8088
 
 ```text
 wechat_articles/articles.sqlite
+```
+
+主要数据表：
+
+```text
+articles            文章正文
+stock_mentions      股票提取结果
+extraction_runs     GPT 提取运行记录
+pipeline_runs       自动化总任务记录
+crawl_state         每个公众号的采集状态
 ```
 
 数据库、采集结果、日志和 `.env` 都已通过 `.gitignore` 排除，不会上传到 GitHub。仓库里只保留代码、页面、测试和示例配置。

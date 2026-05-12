@@ -1,0 +1,30 @@
+{
+  "accounts": [
+    {
+      "name": "盘前纪要",
+      "enabled": true,
+      "crawl_days": 7,
+      "limit": 1000,
+      "seed_urls": [
+        "https://mp.weixin.qq.com/s/4fEHcwMyM3jufw8AeEj_pw",
+        "https://mp.weixin.qq.com/s/6Ir-EVaUV6sHczRz5N2hpw",
+        "https://mp.weixin.qq.com/s/Xif_HM6yPEaH2Y-jZyFgzQ"
+      ]
+    },
+    {
+      "name": "盘前早咖",
+      "enabled": true,
+      "crawl_days": 7,
+      "limit": 1000,
+      "seed_urls": [
+        "https://mp.weixin.qq.com/s/bMgpdjA6m_YgefsrKLUicg",
+        "https://mp.weixin.qq.com/s/M8jdQ3TPpp2xpAFQsehddA",
+        "https://mp.weixin.qq.com/s/7ZiRzPkw5aQildz6YwkRPg"
+      ]
+    }
+  ],
+  "default_output_dir": "./wechat_articles",
+  "db_path": "./wechat_articles/articles.sqlite",
+  "wewe_rss_url": "http://localhost:4000",
+  "llm_model": "gpt-5.4-mini"
+}
