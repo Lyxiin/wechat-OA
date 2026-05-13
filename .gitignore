@@ -3,10 +3,13 @@
 !.env.example
 
 wechat_articles/
+douyin_data/
+cookies/
 articles.jsonl
 *.sqlite
 *.sqlite3
 *.db
+.venv/
 
 __pycache__/
 *.py[cod]
@@ -15,6 +18,10 @@ __pycache__/
 
 tmp*/
 *.log
+*.mp3
+*.m4a
+*.wav
+*.webm
 docker_virtualization_enable.log
 stock_web.out.log
 stock_web.err.log

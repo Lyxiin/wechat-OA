@@ -1,0 +1,23 @@
+{
+  "accounts": [
+    {
+      "name": "老白分析室",
+      "douyin_id": "luge0226",
+      "profile_url": "",
+      "enabled": true,
+      "crawl_days": 3,
+      "limit": 5
+    },
+    {
+      "name": "都业华",
+      "douyin_id": "yxtduyehua",
+      "profile_url": "",
+      "enabled": true,
+      "crawl_days": 3,
+      "limit": 5
+    }
+  ],
+  "default_output_dir": "./douyin_data",
+  "db_path": "./wechat_articles/articles.sqlite",
+  "llm_model": "gpt-5.4-mini"
+}
