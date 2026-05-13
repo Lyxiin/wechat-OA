@@ -21,6 +21,15 @@
         "https://mp.weixin.qq.com/s/M8jdQ3TPpp2xpAFQsehddA",
         "https://mp.weixin.qq.com/s/7ZiRzPkw5aQildz6YwkRPg"
       ]
+    },
+    {
+      "name": "新浪财经",
+      "enabled": true,
+      "crawl_days": 7,
+      "limit": 1000,
+      "seed_urls": [
+        "https://mp.weixin.qq.com/s/Tfni1w0_l7k6290xdkVQHA"
+      ]
     }
   ],
   "default_output_dir": "./wechat_articles",
