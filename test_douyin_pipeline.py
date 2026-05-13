@@ -4,6 +4,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
+import douyin_crawler
 import douyin_pipeline
 import wechat_db
 
@@ -193,6 +194,23 @@ class DouyinPipelineTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "failed")
         self.assertIn("复制抖音主页分享链接", result["errors"][0]["error"])
+
+    def test_canonical_profile_url_extracts_sec_uid_from_share_redirect(self):
+        url = (
+            "https://www.iesdouyin.com/share/user/MS4w"
+            "?sec_uid=MS4wLjABAAAA-profile-id&from=web_code_link"
+        )
+
+        canonical = douyin_crawler.canonical_profile_url(url)
+
+        self.assertEqual(canonical, "https://www.douyin.com/user/MS4wLjABAAAA-profile-id")
+
+    def test_cookies_file_is_only_used_when_it_exists(self):
+        crawler = douyin_crawler.DouyinCrawler(cookies_file=str(self.root / "missing.txt"))
+
+        args = crawler._cookies_args({})
+
+        self.assertEqual(args, [])
 
 
 if __name__ == "__main__":

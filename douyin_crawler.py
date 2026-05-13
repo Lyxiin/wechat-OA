@@ -5,9 +5,17 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
+import requests
 
 CHINA_TZ = timezone(timedelta(hours=8))
+REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
+}
 
 
 class DouyinSetupRequired(RuntimeError):
@@ -48,6 +56,20 @@ def parse_ytdlp_output(output):
     return records
 
 
+def canonical_profile_url(url):
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    sec_uid = (query.get("sec_uid") or [""])[0]
+    if sec_uid:
+        return f"https://www.douyin.com/user/{sec_uid}"
+    parts = [part for part in parsed.path.split("/") if part]
+    if "user" in parts:
+        index = parts.index("user")
+        if len(parts) > index + 1 and parts[index + 1]:
+            return f"https://www.douyin.com/user/{parts[index + 1]}"
+    return url
+
+
 def normalize_video(info, account):
     video_id = str(info.get("id") or info.get("display_id") or "").strip()
     url = info.get("webpage_url") or info.get("original_url") or info.get("url") or ""
@@ -73,6 +95,19 @@ class DouyinCrawler:
         self.cookies_file = cookies_file or os.environ.get("DOUYIN_COOKIES_FILE", "")
         self.ytdlp_cmd = ytdlp_cmd or [sys.executable, "-m", "yt_dlp"]
 
+    def resolve_profile_url(self, url):
+        try:
+            resp = requests.get(url, headers=REQUEST_HEADERS, allow_redirects=True, timeout=20)
+            return canonical_profile_url(resp.url)
+        except requests.RequestException:
+            return canonical_profile_url(url)
+
+    def _cookies_args(self, account):
+        cookies_file = account.get("cookies_file") or self.cookies_file
+        if cookies_file and Path(cookies_file).exists():
+            return ["--cookies", cookies_file]
+        return []
+
     def _run_ytdlp(self, args):
         cmd = [*self.ytdlp_cmd, *args]
         try:
@@ -94,6 +129,7 @@ class DouyinCrawler:
         profile_url = account.get("profile_url") or ""
         if not profile_url:
             raise DouyinSetupRequired(profile_setup_hint(account["name"], account.get("douyin_id", "")))
+        profile_url = self.resolve_profile_url(profile_url)
 
         args = [
             "--dump-json",
@@ -101,9 +137,7 @@ class DouyinCrawler:
             str(limit),
             "--no-warnings",
         ]
-        cookies_file = account.get("cookies_file") or self.cookies_file
-        if cookies_file:
-            args.extend(["--cookies", cookies_file])
+        args.extend(self._cookies_args(account))
         args.append(profile_url)
 
         completed = self._run_ytdlp(args)
@@ -134,9 +168,7 @@ class DouyinCrawler:
             "-o",
             str(audio_dir / "%(id)s.%(ext)s"),
         ]
-        cookies_file = account.get("cookies_file") or self.cookies_file
-        if cookies_file:
-            args.extend(["--cookies", cookies_file])
+        args.extend(self._cookies_args(account))
         args.append(video["url"])
         self._run_ytdlp(args)
 
