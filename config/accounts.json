@@ -30,6 +30,15 @@
       "seed_urls": [
         "https://mp.weixin.qq.com/s/Tfni1w0_l7k6290xdkVQHA"
       ]
+    },
+    {
+      "name": "解读龙虎榜",
+      "enabled": true,
+      "crawl_days": 7,
+      "limit": 1000,
+      "seed_urls": [
+        "https://mp.weixin.qq.com/s/SXQLJ5RHckoZhTgkXpXjvA"
+      ]
     }
   ],
   "default_output_dir": "./wechat_articles",
