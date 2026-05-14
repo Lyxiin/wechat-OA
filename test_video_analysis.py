@@ -124,5 +124,83 @@ class VideoAnalysisStoreTests(unittest.TestCase):
         self.assertTrue(Path(row["transcript_path"]).exists())
 
 
+class FakeLLMClient:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def chat(self, messages, model):
+        self.calls.append({"messages": messages, "model": model})
+        return self.response
+
+
+class ContentAnalyzerTests(unittest.TestCase):
+    def test_analyzer_parses_and_validates_json(self):
+        client = FakeLLMClient(
+            """```json
+            {
+              "summary": "A concise summary",
+              "topics": ["topic"],
+              "keywords": ["keyword"],
+              "timeline": [{"time": "00:00", "event": "intro"}],
+              "key_points": ["point"],
+              "entities": ["entity"],
+              "action_items": [],
+              "open_questions": [],
+              "extensions": {}
+            }
+            ```"""
+        )
+        analyzer = core.ContentAnalyzer(client=client, model="model-test")
+        metadata = core.VideoMetadata(
+            video_id="video-1",
+            source_url="https://example.com/share",
+            canonical_url="https://example.com/video/video-1",
+            title="Title",
+            author="Author",
+        )
+
+        analysis, raw = analyzer.analyze(metadata, "transcript text")
+
+        self.assertEqual(analysis["summary"], "A concise summary")
+        self.assertEqual(raw, client.response)
+        self.assertEqual(client.calls[0]["model"], "model-test")
+
+    def test_analyzer_rejects_invalid_json(self):
+        analyzer = core.ContentAnalyzer(client=FakeLLMClient("not json"), model="model-test")
+        metadata = core.VideoMetadata("video-1", "url", "url")
+
+        with self.assertRaisesRegex(core.AnalysisValidationError, "valid JSON"):
+            analyzer.analyze(metadata, "transcript text")
+
+    def test_render_summary_markdown_contains_human_readable_sections(self):
+        metadata = core.VideoMetadata(
+            video_id="video-1",
+            source_url="https://example.com/share",
+            canonical_url="https://example.com/video/video-1",
+            title="Title",
+            author="Author",
+            publish_time="2026-05-14",
+        )
+        analysis = {
+            "summary": "Summary",
+            "topics": ["Topic"],
+            "keywords": ["Keyword"],
+            "timeline": [{"time": "00:00", "event": "Intro"}],
+            "key_points": ["Point"],
+            "entities": ["Entity"],
+            "action_items": [],
+            "open_questions": ["Question"],
+            "extensions": {},
+        }
+
+        markdown = core.render_summary_markdown(metadata, analysis)
+
+        self.assertIn("# Title", markdown)
+        self.assertIn("Summary", markdown)
+        self.assertIn("- Topic", markdown)
+        self.assertIn("- 00:00 - Intro", markdown)
+
+
 if __name__ == "__main__":
     unittest.main()

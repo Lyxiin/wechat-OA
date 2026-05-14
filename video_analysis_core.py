@@ -248,3 +248,125 @@ class VideoAnalysisStore:
             values,
         )
         self.conn.commit()
+
+
+class AnalysisValidationError(RuntimeError):
+    pass
+
+
+def strip_json_fence(text):
+    return stock_extractor.strip_json_fence(text)
+
+
+def build_analysis_messages(metadata, transcript):
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You analyze transcripts from publicly shared videos for learning and research. "
+                "Return only valid JSON with keys: summary, topics, keywords, timeline, "
+                "key_points, entities, action_items, open_questions, extensions. "
+                "Keep the analysis concise and do not invent facts not supported by the transcript."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Title: {metadata.title}\n"
+                f"Author: {metadata.author}\n"
+                f"URL: {metadata.canonical_url or metadata.source_url}\n\n"
+                f"Transcript:\n{transcript}"
+            ),
+        },
+    ]
+
+
+def validate_analysis(payload):
+    if not isinstance(payload, dict):
+        raise AnalysisValidationError("LLM response must be a JSON object")
+    summary = payload.get("summary")
+    if not isinstance(summary, str):
+        raise AnalysisValidationError("analysis.summary must be a string")
+    for field in REQUIRED_ANALYSIS_LIST_FIELDS:
+        if field not in payload:
+            payload[field] = []
+        if not isinstance(payload[field], list):
+            raise AnalysisValidationError(f"analysis.{field} must be a list")
+    extensions = payload.get("extensions")
+    if extensions is None:
+        payload["extensions"] = {}
+    if not isinstance(payload["extensions"], dict):
+        raise AnalysisValidationError("analysis.extensions must be an object")
+    return payload
+
+
+class ContentAnalyzer:
+    def __init__(self, client=None, model=None):
+        self.client = client or stock_extractor.OpenAIStyleClient()
+        self.model = model or os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+
+    def analyze(self, metadata, transcript):
+        raw = self.client.chat(build_analysis_messages(metadata, transcript), model=self.model)
+        try:
+            payload = json.loads(strip_json_fence(raw))
+        except json.JSONDecodeError as exc:
+            raise AnalysisValidationError("LLM response must be valid JSON") from exc
+        return validate_analysis(payload), raw
+
+
+def _markdown_list(items):
+    if not items:
+        return "- None"
+    return "\n".join(f"- {item}" for item in items)
+
+
+def _timeline_list(items):
+    if not items:
+        return "- None"
+    lines = []
+    for item in items:
+        if isinstance(item, dict):
+            lines.append(f"- {item.get('time', '')} - {item.get('event', '')}".strip())
+        else:
+            lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
+def render_summary_markdown(metadata, analysis):
+    title = metadata.title or metadata.video_id
+    return "\n".join([
+        f"# {title}",
+        "",
+        f"- Source: {metadata.canonical_url or metadata.source_url}",
+        f"- Author: {metadata.author}",
+        f"- Published: {metadata.publish_time}",
+        "",
+        "## Summary",
+        "",
+        analysis.get("summary", ""),
+        "",
+        "## Topics",
+        "",
+        _markdown_list(analysis.get("topics", [])),
+        "",
+        "## Keywords",
+        "",
+        _markdown_list(analysis.get("keywords", [])),
+        "",
+        "## Key Points",
+        "",
+        _markdown_list(analysis.get("key_points", [])),
+        "",
+        "## Timeline",
+        "",
+        _timeline_list(analysis.get("timeline", [])),
+        "",
+        "## Entities",
+        "",
+        _markdown_list(analysis.get("entities", [])),
+        "",
+        "## Open Questions",
+        "",
+        _markdown_list(analysis.get("open_questions", [])),
+        "",
+    ])
