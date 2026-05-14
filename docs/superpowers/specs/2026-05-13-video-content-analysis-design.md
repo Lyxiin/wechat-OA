@@ -1,30 +1,30 @@
-# Public Video Content Analysis Practice Project Design
+# 公开视频内容分析练习项目设计
 
-Date: 2026-05-13
+日期：2026-05-13
 
-## Goal
+## 目标
 
-Build a command-line practice project that analyzes publicly shared videos for learning and research use. The first version extracts audio from user-supplied public video links, transcribes speech, generates a general structured content analysis, and saves both human-readable files and SQLite index records.
+构建一个命令行练习项目，用于对公开分享的视频做学习和研究用途的内容分析。第一版从用户提供的公开视频链接中提取音频，进行语音识别，生成通用的结构化内容分析，并同时保存人类可读的文件产物和 SQLite 索引记录。
 
-The project must use only links and cookies already provided by the user. It must not attempt to bypass privacy, authentication, paywalls, or platform access controls.
+项目只使用用户已经提供的链接和 cookies。项目不得尝试绕过隐私设置、身份认证、付费墙或平台访问控制。
 
-## Approved Decisions
+## 已确认决策
 
-- Input mode: support both direct video/share links and future account-based batch collection, with direct URL lists as the first stable workflow.
-- Analysis mode: use a general extensible structure with summary, topics, keywords, timeline, key points, entities, open questions, and an extension field for future domain-specific analysis.
-- Persistence: write file artifacts for inspection and store SQLite records for indexing, status tracking, and later search or dashboards.
-- Model integration: use adapter boundaries. The default adapters reuse the existing Groq Whisper ASR client and the existing OpenAI-style LLM configuration, while keeping room for local or alternate services later.
-- User interface: command line first. A web viewer can be added later after the pipeline is reliable and tested.
+- 输入方式：同时支持直接视频/分享链接和未来的账号批量采集，其中直接 URL 列表作为第一版稳定工作流。
+- 分析方式：使用通用可扩展结构，包含摘要、主题、关键词、时间线、关键要点、实体、开放问题，以及用于未来领域分析的扩展字段。
+- 持久化方式：写入文件产物以便检查，同时保存 SQLite 记录用于索引、状态跟踪，以及后续搜索或看板。
+- 模型接入：使用适配器边界。默认适配器复用现有 Groq Whisper ASR 客户端和现有 OpenAI-style LLM 配置，同时为以后切换本地模型或其他服务留出空间。
+- 用户界面：命令行优先。等管道可靠并有测试覆盖后，再考虑增加网页查看器。
 
-## Recommended Approach
+## 推荐方案
 
-Add an independent `video_analysis.py` pipeline that reuses the existing ASR and Douyin/yt-dlp capabilities without coupling this learning project to the existing stock article pipeline.
+新增一个独立的 `video_analysis.py` 管道，复用现有 ASR 和 Douyin/yt-dlp 能力，但不把这个学习项目耦合到现有股票文章流水线里。
 
-This is preferred over expanding `douyin_pipeline.py` because it keeps account crawling, finance extraction, and general video analysis separate. It is also preferred over building a full plugin-style media framework because the first version should prioritize a working learning loop.
+相比直接扩展 `douyin_pipeline.py`，这个方案能让账号抓取、财经提取和通用视频分析保持分离。相比搭建完整插件式媒体框架，这个方案也更适合第一版，因为第一版应优先跑通可工作的学习闭环。
 
-## Command-Line Interface
+## 命令行接口
 
-The first version should expose:
+第一版应提供：
 
 ```powershell
 python video_analysis.py init-db
@@ -32,7 +32,7 @@ python video_analysis.py run --urls urls.txt
 python video_analysis.py run --url "https://..."
 ```
 
-Optional rerun controls:
+可选的重跑控制：
 
 ```powershell
 python video_analysis.py run --urls urls.txt --force-download
@@ -40,50 +40,50 @@ python video_analysis.py run --urls urls.txt --force-transcribe
 python video_analysis.py run --urls urls.txt --force-analyze
 ```
 
-Expected default paths:
+预期默认路径：
 
-- Input cookies: `cookies/cookies.txt`, unless overridden by configuration or environment.
-- Output directory: `video_analysis_data/`.
-- SQLite database: `video_analysis_data/video_analysis.sqlite`.
+- 输入 cookies：`cookies/cookies.txt`，除非被配置或环境变量覆盖。
+- 输出目录：`video_analysis_data/`。
+- SQLite 数据库：`video_analysis_data/video_analysis.sqlite`。
 
-## Architecture
+## 架构
 
-The pipeline should be split into small units with clear interfaces:
+管道应拆成接口清晰的小单元：
 
-- `VideoSourceReader`: reads one `--url` value or a `--urls` text file, normalizes whitespace, ignores blank/comment lines, and deduplicates links while preserving order.
-- `VideoDownloader`: resolves video metadata with `yt-dlp`, downloads or extracts audio, and writes metadata and audio files. It should reuse the existing cookies handling pattern from `douyin_crawler.py`.
-- `ASRAdapter`: transcribes audio. The default implementation wraps `asr_client.GroqASRClient`.
-- `ContentAnalyzer`: sends transcript text and metadata to an OpenAI-style LLM and validates the returned JSON analysis.
-- `VideoAnalysisStore`: writes SQLite rows and file artifacts, tracks status, and supports cache decisions.
-- `PipelineRunner`: orchestrates per-video execution and keeps failures isolated.
+- `VideoSourceReader`：读取一个 `--url` 值或一个 `--urls` 文本文件，规范化空白，忽略空行/注释行，并在保持顺序的同时去重链接。
+- `VideoDownloader`：通过 `yt-dlp` 解析视频元数据，下载或提取音频，并写入元数据和音频文件。它应复用 `douyin_crawler.py` 中已有的 cookies 处理模式。
+- `ASRAdapter`：转写音频。默认实现包装 `asr_client.GroqASRClient`。
+- `ContentAnalyzer`：把 transcript 文本和元数据发送给 OpenAI-style LLM，并校验返回的 JSON 分析结果。
+- `VideoAnalysisStore`：写入 SQLite 行和文件产物，跟踪状态，并支持缓存判断。
+- `PipelineRunner`：编排单个视频的执行流程，并隔离失败。
 
-## Data Flow
+## 数据流
 
-For each input link:
+对每个输入链接：
 
-1. Normalize and deduplicate the URL.
-2. Resolve metadata and canonical URL through `yt-dlp`.
-3. Create a stable output folder under `video_analysis_data/<video_id>/`.
-4. Download or reuse audio.
-5. Transcribe or reuse transcript.
-6. Analyze transcript or reuse analysis when the transcript hash matches.
-7. Write `metadata.json`, `transcript.txt`, `analysis.json`, and `summary.md`.
-8. Upsert an SQLite row with status, metadata, hashes, output paths, and error details.
-9. Continue to the next video even if one video fails.
+1. 规范化 URL 并去重。
+2. 通过 `yt-dlp` 解析元数据和 canonical URL。
+3. 在 `video_analysis_data/<video_id>/` 下创建稳定输出目录。
+4. 下载或复用音频。
+5. 转写或复用 transcript。
+6. 当 transcript hash 匹配时复用 analysis，否则重新分析 transcript。
+7. 写入 `metadata.json`、`transcript.txt`、`analysis.json` 和 `summary.md`。
+8. 用状态、元数据、hash、输出路径和错误详情 upsert 一条 SQLite 记录。
+9. 即使某个视频失败，也继续处理下一个视频。
 
-## File Artifacts
+## 文件产物
 
-Each video folder should contain:
+每个视频目录应包含：
 
-- `metadata.json`: title, author, source URL, canonical URL, publish time, duration, thumbnail URL, and raw selected metadata.
-- `audio.mp3`: extracted audio when available.
-- `transcript.txt`: plain text transcript.
-- `analysis.json`: validated structured analysis.
-- `summary.md`: human-readable result for quick review.
+- `metadata.json`：标题、作者、来源 URL、canonical URL、发布时间、时长、缩略图 URL，以及选取后的原始元数据。
+- `audio.mp3`：可用时保存提取出的音频。
+- `transcript.txt`：纯文本转写结果。
+- `analysis.json`：已校验的结构化分析。
+- `summary.md`：用于快速查看的人类可读结果。
 
-## Analysis JSON
+## 分析 JSON
 
-The analyzer should produce this stable shape:
+分析器应生成这个稳定结构：
 
 ```json
 {
@@ -101,11 +101,11 @@ The analyzer should produce this stable shape:
 }
 ```
 
-The implementation should validate that the top-level object exists, required list fields are lists, and `summary` is a string. If the model returns invalid JSON, the pipeline should save the raw response for debugging and mark only that video as failed.
+实现应校验顶层对象存在、必需列表字段确实是列表，并且 `summary` 是字符串。如果模型返回无效 JSON，管道应保存原始响应用于调试，并只将当前视频标记为失败。
 
-## SQLite Storage
+## SQLite 存储
 
-Use a lightweight table such as `video_items`:
+使用一张轻量表，例如 `video_items`：
 
 - `id`
 - `video_id`
@@ -128,70 +128,70 @@ Use a lightweight table such as `video_items`:
 - `created_at`
 - `updated_at`
 
-The database stores indexable metadata and paths. Full transcripts and full analysis JSON remain in files.
+数据库保存可索引的元数据和路径。完整 transcript 和完整 analysis JSON 保留在文件中。
 
-## Caching
+## 缓存
 
-Default behavior should avoid repeated network and model calls:
+默认行为应避免重复网络请求和模型调用：
 
-- Reuse audio if the expected audio file exists and has non-zero size.
-- Reuse transcript if `transcript.txt` exists and is non-empty.
-- Reuse analysis if `analysis.json` exists and the saved transcript hash matches the current transcript hash.
+- 如果预期音频文件存在且大小非零，则复用音频。
+- 如果 `transcript.txt` 存在且非空，则复用 transcript。
+- 如果 `analysis.json` 存在，且保存的 transcript hash 与当前 transcript hash 匹配，则复用 analysis。
 
-Rerun flags should override only their corresponding stage:
+重跑参数只覆盖对应阶段：
 
-- `--force-download` downloads audio again.
-- `--force-transcribe` reruns ASR from existing or newly downloaded audio.
-- `--force-analyze` reruns LLM analysis from the current transcript.
+- `--force-download` 重新下载音频。
+- `--force-transcribe` 从已有或新下载的音频重新运行 ASR。
+- `--force-analyze` 基于当前 transcript 重新运行 LLM 分析。
 
-## Error Handling
+## 错误处理
 
-Failures should be isolated per video. A failed URL should not stop the rest of the batch.
+失败应按视频隔离。某个 URL 失败不应中断整个批次。
 
-Common errors should produce readable messages:
+常见错误应提供可读信息：
 
-- Missing cookies file when a platform requires cookies.
-- `yt-dlp` not installed or not runnable.
-- Download or metadata resolution failed.
-- Audio file was not created.
-- ASR API key is missing or placeholder.
-- ASR response is empty.
-- LLM API key is missing or placeholder.
-- LLM response is not valid JSON.
+- 平台需要 cookies 但 cookies 文件缺失。
+- `yt-dlp` 未安装或无法运行。
+- 下载或元数据解析失败。
+- 音频文件未创建。
+- ASR API key 缺失或仍是占位值。
+- ASR 响应为空。
+- LLM API key 缺失或仍是占位值。
+- LLM 响应不是有效 JSON。
 
-Each failed item should update SQLite with `status = failed`, store the error string, and continue processing remaining links.
+每个失败项都应更新 SQLite，设置 `status = failed`，保存错误字符串，并继续处理剩余链接。
 
-## Testing Strategy
+## 测试策略
 
-Default tests should avoid real network and real model calls. Use fake downloaders, fake ASR clients, and fake analyzers.
+默认测试应避免真实网络和真实模型调用。使用 fake downloader、fake ASR client 和 fake analyzer。
 
-Coverage should include:
+覆盖范围应包括：
 
-- URL file parsing, comment skipping, and deduplication.
-- Output path generation and stable video folder naming.
-- Audio, transcript, and analysis cache behavior.
-- End-to-end pipeline orchestration with fake clients.
-- Failure isolation when one URL fails.
-- JSON analysis validation and invalid-response handling.
-- SQLite upsert behavior.
+- URL 文件解析、注释跳过和去重。
+- 输出路径生成和稳定的视频目录命名。
+- 音频、transcript 和 analysis 缓存行为。
+- 使用 fake client 的端到端管道编排。
+- 某个 URL 失败时的失败隔离。
+- JSON 分析结果校验和无效响应处理。
+- SQLite upsert 行为。
 
-Manual verification can cover real `yt-dlp`, cookies, Groq ASR, and LLM calls after unit tests pass.
+单元测试通过后，再用手动验证覆盖真实 `yt-dlp`、cookies、Groq ASR 和 LLM 调用。
 
-## Acceptance Criteria
+## 验收标准
 
-The first version is complete when:
+第一版在满足以下条件时完成：
 
-- `python video_analysis.py init-db` creates the SQLite schema.
-- `python video_analysis.py run --url "<public video url>"` creates file artifacts and a database row.
-- `python video_analysis.py run --urls urls.txt` processes multiple links and reports per-video results.
-- Existing audio, transcript, and analysis artifacts are reused unless force flags are provided.
-- A fake-client test suite passes without network or API credentials.
-- Real API credentials remain outside git and are loaded from `.env` or environment variables.
+- `python video_analysis.py init-db` 能创建 SQLite schema。
+- `python video_analysis.py run --url "<public video url>"` 能创建文件产物和数据库记录。
+- `python video_analysis.py run --urls urls.txt` 能处理多个链接，并报告每个视频的结果。
+- 已存在的音频、transcript 和 analysis 产物会被复用，除非提供 force 参数。
+- fake-client 测试套件无需网络或 API 凭据即可通过。
+- 真实 API 凭据不进入 git，通过 `.env` 或环境变量加载。
 
-## Out of Scope for First Version
+## 第一版不包含
 
-- Browser-based UI.
-- Search dashboard.
-- Cross-platform media abstraction beyond what the current `yt-dlp` flow naturally supports.
-- Automated account crawling beyond retaining compatibility with the existing Douyin account pipeline.
-- Domain-specific finance, sentiment, course-note, or knowledge-base extraction beyond the generic `extensions` field.
+- 浏览器 UI。
+- 搜索看板。
+- 超出当前 `yt-dlp` 流程自然支持范围的跨平台媒体抽象。
+- 自动账号抓取，但保留与现有 Douyin 账号管道兼容的空间。
+- 除通用 `extensions` 字段外的特定领域财经、舆情、课程笔记或知识库提取。
