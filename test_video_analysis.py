@@ -280,5 +280,108 @@ class YtDlpDownloaderTests(unittest.TestCase):
         self.assertEqual(audio_path.read_bytes(), b"cached")
 
 
+class FakeDownloader:
+    def __init__(self):
+        self.metadata_calls = []
+        self.audio_calls = []
+
+    def resolve_metadata(self, source_url):
+        self.metadata_calls.append(source_url)
+        if "bad" in source_url:
+            raise RuntimeError("download failed")
+        video_id = source_url.rsplit("/", 1)[-1]
+        return core.VideoMetadata(
+            video_id=video_id,
+            source_url=source_url,
+            canonical_url=source_url,
+            title=f"Title {video_id}",
+            author="Author",
+        )
+
+    def download_audio(self, metadata, paths, force=False):
+        self.audio_calls.append((metadata.video_id, force))
+        paths.audio_path.parent.mkdir(parents=True, exist_ok=True)
+        paths.audio_path.write_bytes(b"audio")
+        return paths.audio_path
+
+
+class FakeASR:
+    def __init__(self):
+        self.calls = []
+
+    def transcribe(self, audio_path):
+        self.calls.append(Path(audio_path).name)
+        return "transcript text"
+
+
+class FakeAnalyzer:
+    def __init__(self):
+        self.calls = []
+
+    def analyze(self, metadata, transcript):
+        self.calls.append((metadata.video_id, transcript))
+        return {
+            "summary": f"Summary {metadata.video_id}",
+            "topics": ["Topic"],
+            "keywords": ["Keyword"],
+            "timeline": [],
+            "key_points": ["Point"],
+            "entities": [],
+            "action_items": [],
+            "open_questions": [],
+            "extensions": {},
+        }, "{\"summary\":\"raw\"}"
+
+
+class PipelineRunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path.cwd() / ".test_tmp" / "video_analysis_pipeline"
+        if self.root.exists():
+            shutil.rmtree(self.root)
+        self.root.mkdir(parents=True)
+        self.store = core.VideoAnalysisStore(
+            output_dir=self.root / "data",
+            db_path=self.root / "data" / "video_analysis.sqlite",
+        )
+        self.store.initialize_db()
+
+    def tearDown(self):
+        self.store.close()
+        if self.root.exists():
+            shutil.rmtree(self.root)
+
+    def test_pipeline_writes_artifacts_and_continues_after_failure(self):
+        runner = core.PipelineRunner(
+            store=self.store,
+            downloader=FakeDownloader(),
+            asr=FakeASR(),
+            analyzer=FakeAnalyzer(),
+        )
+
+        result = runner.run_urls(["https://example.com/good", "https://example.com/bad"])
+
+        self.assertEqual(result["status"], "partial_failed")
+        self.assertEqual(result["videos_total"], 2)
+        self.assertEqual(result["videos_succeeded"], 1)
+        self.assertEqual(result["videos_failed"], 1)
+        good_row = self.store.get_item("good")
+        bad_row = self.store.get_item(core.content_hash("https://example.com/bad")[:16])
+        self.assertEqual(good_row["status"], "success")
+        self.assertEqual(bad_row["status"], "failed")
+        self.assertTrue(Path(good_row["analysis_path"]).exists())
+
+    def test_pipeline_reuses_cached_transcript_and_analysis(self):
+        downloader = FakeDownloader()
+        asr = FakeASR()
+        analyzer = FakeAnalyzer()
+        runner = core.PipelineRunner(self.store, downloader, asr, analyzer)
+
+        runner.run_urls(["https://example.com/good"])
+        runner.run_urls(["https://example.com/good"])
+
+        self.assertEqual(asr.calls, ["audio.mp3"])
+        self.assertEqual(len(analyzer.calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

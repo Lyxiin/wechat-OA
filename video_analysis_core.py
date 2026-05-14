@@ -485,3 +485,120 @@ class YtDlpVideoDownloader:
             matches[0].replace(paths.audio_path)
             return paths.audio_path
         raise RuntimeError(f"audio file was not created for {metadata.source_url}")
+
+
+def empty_run_result(total):
+    return {
+        "status": "running",
+        "videos_total": total,
+        "videos_succeeded": 0,
+        "videos_failed": 0,
+        "items": [],
+    }
+
+
+def final_run_status(result):
+    if result["videos_failed"] and result["videos_succeeded"]:
+        return "partial_failed"
+    if result["videos_failed"]:
+        return "failed"
+    return "success"
+
+
+def should_reuse_analysis(store, paths, transcript):
+    payload = store.read_json_if_present(paths.analysis_path)
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("_transcript_hash") == content_hash(transcript)
+
+
+class PipelineRunner:
+    def __init__(self, store, downloader, asr, analyzer):
+        self.store = store
+        self.downloader = downloader
+        self.asr = asr
+        self.analyzer = analyzer
+
+    def run_urls(
+        self,
+        urls,
+        force_download=False,
+        force_transcribe=False,
+        force_analyze=False,
+    ):
+        result = empty_run_result(len(urls))
+        for source_url in urls:
+            item = self.run_one(
+                source_url,
+                force_download=force_download,
+                force_transcribe=force_transcribe,
+                force_analyze=force_analyze,
+            )
+            result["items"].append(item)
+            if item["status"] == "success":
+                result["videos_succeeded"] += 1
+            else:
+                result["videos_failed"] += 1
+        result["status"] = final_run_status(result)
+        return result
+
+    def run_one(self, source_url, force_download=False, force_transcribe=False, force_analyze=False):
+        fallback_id = content_hash(source_url)[:16]
+        fallback_metadata = VideoMetadata(
+            video_id=fallback_id,
+            source_url=source_url,
+            canonical_url=source_url,
+        )
+        fallback_paths = self.store.paths_for(fallback_id)
+        try:
+            metadata = self.downloader.resolve_metadata(source_url)
+            paths = self.store.paths_for(metadata.video_id)
+            self.store.write_json(paths.metadata_path, metadata.to_dict())
+            audio_path = self.downloader.download_audio(metadata, paths, force=force_download)
+            transcript = self.store.read_text_if_present(paths.transcript_path)
+            if force_transcribe or not transcript:
+                transcript = self.asr.transcribe(audio_path).strip()
+                if not transcript:
+                    raise RuntimeError(f"empty transcript for {metadata.source_url}")
+                self.store.write_text(paths.transcript_path, transcript)
+            if force_analyze or not should_reuse_analysis(self.store, paths, transcript):
+                try:
+                    analysis, raw = self.analyzer.analyze(metadata, transcript)
+                except Exception as exc:
+                    if hasattr(exc, "__cause__"):
+                        self.store.write_text(paths.raw_analysis_path, str(exc.__cause__))
+                    raise
+                analysis["_transcript_hash"] = content_hash(transcript)
+                self.store.write_json(paths.analysis_path, analysis)
+                self.store.write_text(paths.summary_path, render_summary_markdown(metadata, analysis))
+            else:
+                analysis = self.store.read_json_if_present(paths.analysis_path)
+            transcript_hash = content_hash(transcript)
+            analysis_hash = content_hash(json.dumps(analysis, ensure_ascii=False, sort_keys=True))
+            self.store.upsert_item(
+                metadata=metadata,
+                paths=paths,
+                status="success",
+                error=None,
+                transcript_hash=transcript_hash,
+                analysis_hash=analysis_hash,
+            )
+            return {
+                "status": "success",
+                "video_id": metadata.video_id,
+                "title": metadata.title,
+                "summary_path": str(paths.summary_path),
+            }
+        except Exception as exc:
+            self.store.upsert_item(
+                metadata=fallback_metadata,
+                paths=fallback_paths,
+                status="failed",
+                error=str(exc),
+            )
+            return {
+                "status": "failed",
+                "video_id": fallback_metadata.video_id,
+                "url": source_url,
+                "error": str(exc),
+            }
