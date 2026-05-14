@@ -10,6 +10,7 @@ articles.jsonl
 *.sqlite3
 *.db
 .venv/
+.worktrees/
 
 __pycache__/
 *.py[cod]
