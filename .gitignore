@@ -4,6 +4,7 @@
 
 wechat_articles/
 douyin_data/
+video_analysis_data/
 cookies/
 articles.jsonl
 *.sqlite

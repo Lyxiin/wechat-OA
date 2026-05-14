@@ -3,6 +3,7 @@ import shutil
 import unittest
 from pathlib import Path
 
+import video_analysis
 import video_analysis_core as core
 
 
@@ -381,6 +382,25 @@ class PipelineRunnerTests(unittest.TestCase):
 
         self.assertEqual(asr.calls, ["audio.mp3"])
         self.assertEqual(len(analyzer.calls), 1)
+
+
+class VideoAnalysisCliTests(unittest.TestCase):
+    def test_parser_accepts_run_url(self):
+        parser = video_analysis.build_parser()
+
+        args = parser.parse_args(["run", "--url", "https://example.com/video/1"])
+
+        self.assertEqual(args.command, "run")
+        self.assertEqual(args.url, "https://example.com/video/1")
+        self.assertFalse(args.force_analyze)
+
+    def test_parser_accepts_init_db(self):
+        parser = video_analysis.build_parser()
+
+        args = parser.parse_args(["init-db", "--db", "custom.sqlite"])
+
+        self.assertEqual(args.command, "init-db")
+        self.assertEqual(args.db, "custom.sqlite")
 
 
 if __name__ == "__main__":
