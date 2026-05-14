@@ -202,5 +202,83 @@ class ContentAnalyzerTests(unittest.TestCase):
         self.assertIn("- 00:00 - Intro", markdown)
 
 
+class FakeCompleted:
+    def __init__(self, stdout=""):
+        self.stdout = stdout
+
+
+class YtDlpDownloaderTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path.cwd() / ".test_tmp" / "video_analysis_downloader"
+        if self.root.exists():
+            shutil.rmtree(self.root)
+        self.root.mkdir(parents=True)
+        self.cookies = self.root / "cookies.txt"
+        self.cookies.write_text("# cookies", encoding="utf-8")
+        self.calls = []
+
+    def tearDown(self):
+        if self.root.exists():
+            shutil.rmtree(self.root)
+
+    def fake_runner(self, cmd):
+        self.calls.append(cmd)
+        if "--dump-json" in cmd:
+            return FakeCompleted(stdout=json.dumps({
+                "id": "video-1",
+                "webpage_url": "https://example.com/video/video-1",
+                "title": "Title",
+                "uploader": "Author",
+                "timestamp": 1778736000,
+                "duration": 12.5,
+                "thumbnail": "https://example.com/cover.jpg"
+            }))
+        output_index = cmd.index("-o") + 1
+        output_template = Path(cmd[output_index])
+        audio_path = output_template.parent / "video-1.mp3"
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
+        audio_path.write_bytes(b"audio")
+        return FakeCompleted()
+
+    def test_resolve_metadata_uses_ytdlp_and_cookies(self):
+        downloader = core.YtDlpVideoDownloader(cookies_file=self.cookies, runner=self.fake_runner)
+
+        metadata = downloader.resolve_metadata("https://example.com/share")
+
+        self.assertEqual(metadata.video_id, "video-1")
+        self.assertEqual(metadata.title, "Title")
+        self.assertEqual(metadata.author, "Author")
+        self.assertIn("--cookies", self.calls[0])
+
+    def test_download_audio_creates_expected_audio_path(self):
+        downloader = core.YtDlpVideoDownloader(cookies_file=self.cookies, runner=self.fake_runner)
+        metadata = downloader.resolve_metadata("https://example.com/share")
+        store = core.VideoAnalysisStore(self.root / "data", self.root / "data" / "db.sqlite")
+        try:
+            paths = store.paths_for(metadata.video_id)
+        finally:
+            store.close()
+
+        audio_path = downloader.download_audio(metadata, paths, force=False)
+
+        self.assertEqual(audio_path, paths.audio_path)
+        self.assertTrue(audio_path.exists())
+
+    def test_download_audio_reuses_existing_file_without_force(self):
+        downloader = core.YtDlpVideoDownloader(cookies_file=self.cookies, runner=self.fake_runner)
+        metadata = core.VideoMetadata("video-1", "source", "canonical")
+        store = core.VideoAnalysisStore(self.root / "data", self.root / "data" / "db.sqlite")
+        try:
+            paths = store.paths_for(metadata.video_id)
+        finally:
+            store.close()
+        paths.audio_path.parent.mkdir(parents=True, exist_ok=True)
+        paths.audio_path.write_bytes(b"cached")
+
+        audio_path = downloader.download_audio(metadata, paths, force=False)
+
+        self.assertEqual(audio_path.read_bytes(), b"cached")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -370,3 +370,118 @@ def render_summary_markdown(metadata, analysis):
         _markdown_list(analysis.get("open_questions", [])),
         "",
     ])
+
+
+def _timestamp_to_iso(value):
+    if not value:
+        return ""
+    return datetime.fromtimestamp(int(value), timezone.utc).isoformat()
+
+
+def _upload_date_to_iso(value):
+    if not value:
+        return ""
+    text = str(value)
+    if len(text) != 8:
+        return ""
+    return f"{text[0:4]}-{text[4:6]}-{text[6:8]}"
+
+
+def _first_ytdlp_record(stdout):
+    records = []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        payload = json.loads(line)
+        if payload.get("_type") == "playlist":
+            records.extend(payload.get("entries") or [])
+        else:
+            records.append(payload)
+    if not records:
+        raise RuntimeError("yt-dlp returned no metadata")
+    return records[0]
+
+
+class YtDlpVideoDownloader:
+    def __init__(self, cookies_file=DEFAULT_COOKIES_FILE, ytdlp_cmd=None, runner=None):
+        self.cookies_file = Path(cookies_file) if cookies_file else None
+        self.ytdlp_cmd = ytdlp_cmd or [sys.executable, "-m", "yt_dlp"]
+        self.runner = runner
+
+    def _cookies_args(self):
+        if self.cookies_file and self.cookies_file.exists():
+            return ["--cookies", str(self.cookies_file)]
+        return []
+
+    def _run_ytdlp(self, args):
+        cmd = [*self.ytdlp_cmd, *args]
+        if self.runner:
+            return self.runner(cmd)
+        try:
+            return subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("yt-dlp is not installed. Run: python -m pip install yt-dlp") from exc
+        except subprocess.CalledProcessError as exc:
+            message = (exc.stderr or exc.stdout or str(exc)).strip()
+            raise RuntimeError(f"yt-dlp failed: {message}") from exc
+
+    def resolve_metadata(self, source_url):
+        args = ["--dump-json", "--no-warnings", "--no-playlist"]
+        args.extend(self._cookies_args())
+        args.append(source_url)
+        completed = self._run_ytdlp(args)
+        info = _first_ytdlp_record(completed.stdout)
+        video_id = safe_video_id(info.get("id") or info.get("display_id") or content_hash(source_url)[:16])
+        canonical_url = info.get("webpage_url") or info.get("original_url") or source_url
+        publish_time = (
+            _timestamp_to_iso(info.get("timestamp"))
+            or _timestamp_to_iso(info.get("release_timestamp"))
+            or _upload_date_to_iso(info.get("upload_date"))
+        )
+        return VideoMetadata(
+            video_id=video_id,
+            source_url=source_url,
+            canonical_url=canonical_url,
+            title=(info.get("title") or info.get("description") or video_id).strip(),
+            author=(info.get("uploader") or info.get("channel") or "").strip(),
+            publish_time=publish_time,
+            duration=info.get("duration"),
+            thumbnail_url=info.get("thumbnail") or "",
+            raw=info,
+        )
+
+    def download_audio(self, metadata, paths, force=False):
+        if paths.audio_path.exists() and paths.audio_path.stat().st_size > 0 and not force:
+            return paths.audio_path
+        paths.audio_path.parent.mkdir(parents=True, exist_ok=True)
+        args = [
+            "--extract-audio",
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "0",
+            "--no-playlist",
+            "-o",
+            str(paths.folder / "%(id)s.%(ext)s"),
+        ]
+        args.extend(self._cookies_args())
+        args.append(metadata.canonical_url or metadata.source_url)
+        self._run_ytdlp(args)
+        expected = paths.folder / f"{metadata.video_id}.mp3"
+        if expected.exists() and expected != paths.audio_path:
+            expected.replace(paths.audio_path)
+        if paths.audio_path.exists() and paths.audio_path.stat().st_size > 0:
+            return paths.audio_path
+        matches = sorted(paths.folder.glob("*.mp3"))
+        if matches:
+            matches[0].replace(paths.audio_path)
+            return paths.audio_path
+        raise RuntimeError(f"audio file was not created for {metadata.source_url}")
